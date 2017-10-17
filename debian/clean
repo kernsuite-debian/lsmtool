@@ -1,0 +1,9 @@
+*.egg-info/
+dist/
+tests/final.sky
+tests/flux_ratio_sky.pdf
+tests/flux_ratio_vs_distance.pdf
+tests/flux_ratio_vs_flux.pdf
+tests/plot.pdf
+tests/positional_offsets_im.pdf
+tests/positional_offsets_sky.pdf

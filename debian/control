@@ -1,0 +1,27 @@
+Source: lsmtool
+Section: science
+Priority: optional
+Maintainer: KERN packaging <packaging@kernsuite.info>
+Build-Depends:
+ debhelper (>=9),
+ dh-python,
+ python-all (>= 2.6.6-3~),
+ python-setuptools,
+ python-numpy,
+ python-matplotlib,
+ python-astropy,
+ python-wcsaxes,
+ python-pyvo
+Standards-Version: 3.9.7
+Homepage: https://github.com/darafferty/LSMTool/
+X-Python-Version: >= 2.6
+Vcs-Git: https://github.com/kernsuite-debian/lsmtool
+Vcs-Browser: https://github.com/kernsuite-debian/lsmtool
+
+Package: lsmtool
+Architecture: all
+Depends: ${python:Depends}, ${misc:Depends}
+Description: LOFAR Local Sky Model Tool  (Python 2)
+ LSMTool allows the manipulation of LOFAR sky models (in the makesourcedb format).
+ .
+ This package installs the library for Python 2.
