@@ -1,0 +1,79 @@
+*.py[cod]
+
+# C extensions
+*.so
+
+# Packages
+*.egg
+*.egg-info
+dist
+build
+eggs
+parts
+bin
+var
+sdist
+develop-eggs
+.installed.cfg
+lib
+lib64
+__pycache__
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+.coverage
+.tox
+nosetests.xml
+
+# Translations
+*.mo
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# OS-specific
+.DS_Store
+.directory
+
+# Editors
+.*.s[a-w][a-z]
+*.un~
+Session.vim
+.netrwhist
+*~
+*.kate-swp
+
+# IDE
+.idea/*
+*.iml
+
+# Project specific
+tests/test.sky
+
+tests/test_big.sky
+
+tests/final.sky
+
+tests/plot.pdf
+
+tests/flux_ratio_sky.pdf
+
+tests/flux_ratio_vs_distance.pdf
+
+tests/flux_ratio_vs_flux.pdf
+
+tests/postional_offsets.pdf
+
+tests/positional_offsets_im.pdf
+
+tests/positional_offsets_sky.pdf
+
+tests/stats.txt
+
+tests/stats.txt
+
+tests/stats.txt
