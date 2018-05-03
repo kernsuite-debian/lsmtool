@@ -1,3 +1,12 @@
+lsmtool (1.2.0-1kern1) bionic; urgency=medium
+
+  * build for bionic
+  * make debian files mit
+  * add debian watch file
+  * remove wcsaxes dependency
+
+ -- KERN packaging <packaging@kernsuite.info>  Thu, 03 May 2018 16:46:12 +0200
+
 lsmtool (1.2.0-1) xenial; urgency=medium
 
   * Initial release
