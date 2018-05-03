@@ -10,7 +10,6 @@ Build-Depends:
  python-numpy,
  python-matplotlib,
  python-astropy,
- python-wcsaxes,
  python-pyvo
 Standards-Version: 3.9.7
 Homepage: https://github.com/darafferty/LSMTool/
