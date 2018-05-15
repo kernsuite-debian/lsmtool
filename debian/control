@@ -10,7 +10,8 @@ Build-Depends:
  python-numpy,
  python-matplotlib,
  python-astropy,
- python-pyvo
+ python-pyvo,
+ python-pytest-runner
 Standards-Version: 3.9.7
 Homepage: https://github.com/darafferty/LSMTool/
 X-Python-Version: >= 2.6
