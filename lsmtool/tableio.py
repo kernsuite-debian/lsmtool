@@ -45,7 +45,21 @@ else:
     def iteritems(d):
         return d.iteritems()
     numpy_type = "S"
-    
+try:
+    unicode = unicode
+except NameError:
+    # Python 3
+    basestring = (str,bytes)
+else:
+    # Python 2
+    basestring = basestring
+import io
+try:
+    # Python 2
+    file_types = (file, io.IOBase)
+except NameError:
+    # Python 3
+    file_types = (io.IOBase,)
 
 # Define the valid columns here as dictionaries. The entry key is the lower-case
 # name of the column, the entry value is the key used in the astropy table of the
@@ -420,11 +434,21 @@ def processLine(line, metaDict, colNames):
 
     # Check for patch lines as any line with an empty Name entry. If found,
     # store patch positions in the table meta data.
-    if colLines[0].strip() == '':
+    nameIndx = colNames.index('Name')
+    if colLines[nameIndx].strip() == '':
         if len(colLines) > 4:
-            patchName = colLines[2].strip()
-            patchRA = RA2Angle(colLines[3].strip())
-            patchDec = Dec2Angle(colLines[4].strip())
+            patchIndx = colNames.index('Patch')
+            patchName = colLines[patchIndx].strip()
+            RAIndx = colNames.index('Ra')
+            if colLines[RAIndx].strip() == '':
+                patchRA = [0.0]
+            else:
+                patchRA = RA2Angle(colLines[RAIndx].strip())
+            DecIndx = colNames.index('Dec')
+            if colLines[DecIndx].strip() == '':
+                patchDec = [0.0]
+            else:
+                patchDec = Dec2Angle(colLines[DecIndx].strip())
             metaDict[patchName] = [patchRA[0], patchDec[0]]
         return None, metaDict
 
@@ -516,7 +540,7 @@ def skyModelIdentify(origin, *args, **kwargs):
     # Search for a format line. If found, assume file is valid
     if isinstance(args[0], basestring):
         f = open(args[0])
-    elif isinstance(args[0], file):
+    elif isinstance(args[0], file_types):
         f = args[0]
     else:
         return False
@@ -555,7 +579,7 @@ def skyModelWriter(table, fileName):
             continue
         colName = allowedColumnNames[colKey.lower()]
 
-        if colName in table.meta:
+        if colName in table.meta and colName != 'Patch':
             colHeader = "{0}='{1}'".format(colName, table.meta[colName])
         elif colName == 'SpectralIndex':
             colHeader = "{0}='[]'".format(colName)
@@ -1056,9 +1080,9 @@ def coneSearch(VOService, position, radius):
     return table
 
 
-def getGSM(position, radius, assocTheta):
+def getTGSS(position, radius):
     """
-    Returns the file name from a gsm.py search.
+    Returns the file name from a TGSS search.
 
     Parameters
     ----------
@@ -1069,14 +1093,46 @@ def getGSM(position, radius, assocTheta):
     radius : float or str, optional
         Radius in degrees (if float) or 'value unit' (if str; e.g.,
         '30 arcsec') for cone search region in degrees
-    assocTheta : float or str, optional
-        Radius in degrees (if float) or 'value unit' (if str; e.g.,
-        '30 arcsec') for GSM source association
 
     """
     import tempfile
     import subprocess
-    import lofar.gsm.gsmutils as gsm
+
+    log = logging.getLogger('LSMTool.Load')
+
+    outFile = tempfile.NamedTemporaryFile()
+    RA = RA2Angle(position[0])[0].value
+    Dec = Dec2Angle(position[1])[0].value
+    try:
+        radius = Angle(radius, unit='degree').value
+    except TypeError:
+        raise ValueError('TGSS query radius not understood.')
+
+    url = 'http://tgssadr.strw.leidenuniv.nl/cgi-bin/gsmv3.cgi?coord={0},{1}&radius={2}&unit=deg&deconv=y'.format(
+          RA, Dec, radius)
+    cmd = ['wget', '-O', outFile.name, url]
+    subprocess.call(cmd)
+
+    return outFile
+
+
+def getGSM(position, radius):
+    """
+    Returns the file name from a GSM search.
+
+    Parameters
+    ----------
+    position : list of floats
+        A list specifying a new position as [RA, Dec] in either makesourcedb
+        format (e.g., ['12:23:43.21', '+22.34.21.2']) or in degrees (e.g.,
+        [123.2312, 23.3422])
+    radius : float or str, optional
+        Radius in degrees (if float) or 'value unit' (if str; e.g.,
+        '30 arcsec') for cone search region in degrees
+
+    """
+    import tempfile
+    import subprocess
 
     log = logging.getLogger('LSMTool.Load')
 
@@ -1087,13 +1143,10 @@ def getGSM(position, radius, assocTheta):
         radius = Angle(radius, unit='degree').value
     except TypeError:
         raise ValueError('GSM query radius not understood.')
-    try:
-        assocTheta = Angle(assocTheta, unit='degree').value
-    except TypeError:
-        raise ValueError('GSM association radius not understood.')
 
-    cmd = ['gsm.py', outFile.name, '{0}'.format(RA), '{0}'.format(Dec),
-        '{0}'.format(radius), '{0}'.format(assocTheta)]
+    url = 'https://lcs165.lofar.eu/cgi-bin/gsmv1.cgi?coord={0},{1}&radius={2}&unit=deg&deconv=y'.format(
+          RA, Dec, radius)
+    cmd = ['wget', '-O', outFile.name, url]
     subprocess.call(cmd)
 
     return outFile

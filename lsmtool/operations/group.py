@@ -31,12 +31,21 @@ def run(step, parset, LSM):
     targetFlux = parset.getString('.'.join(["LSMTool.Steps", step, "TargetFlux"]), '1.0 Jy' )
     numClusters = parset.getInt('.'.join(["LSMTool.Steps", step, "NumClusters"]), 100 )
     threshold = parset.getString('.'.join(["LSMTool.Steps", step, "Threshold"]), '1.0 Jy' )
-    FWHM = parset.getString('.'.join(["LSMTool.Steps", step, "FWHM"]), '1.0 Jy' )
+    FWHM = parset.getString('.'.join(["LSMTool.Steps", step, "FWHM"]), None )
     applyBeam = parset.getBool('.'.join(["LSMTool.Steps", step, "ApplyBeam"]), False )
     method = parset.getString('.'.join(["LSMTool.Steps", step, "Method"]), 'mid' )
+    pad_index = parset.getBool('.'.join(["LSMTool.Steps", step, "PadIndex"]), False )
+    byPatch = parset.getBool('.'.join(["LSMTool.Steps", step, "ByPatch"]), False )
+    facet = parset.getString('.'.join(["LSMTool.Steps", step, "Facet"]), '' )
+    kernelSize = parset.getString('.'.join(["LSMTool.Steps", step, "KernelSize"]), '0.1' )
+    nIterations = parset.getInt('.'.join(["LSMTool.Steps", step, "NIterations"]), '100' )
+    lookDistance = parset.getString('.'.join(["LSMTool.Steps", step, "LookDistance"]), '0.2' )
+    groupingDistance = parset.getString('.'.join(["LSMTool.Steps", step, "GroupingDistance"]), '0.01' )
 
     try:
-        group(LSM, algorithm, targetFlux, numClusters, applyBeam, root, method)
+        group(LSM, algorithm, targetFlux, numClusters, FWHM, threshold, applyBeam, root,
+              pad_index, method, facet, byPatch, float(kernelSize), nIterations,
+              float(lookDistance), float(groupingDistance))
         result = 0
     except Exception as e:
         log.error(e.message)
@@ -50,8 +59,9 @@ def run(step, parset, LSM):
 
 
 def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
-    threshold=0.1, applyBeam=False, root='Patch', pad_index=False, method='mid',
-    facet="", byPatch=False):
+          threshold=0.1, applyBeam=False, root='Patch', pad_index=False, method='mid',
+          facet="", byPatch=False, kernelSize=0.1, nIterations=100, lookDistance=0.2,
+          groupingDistance=0.01):
     """
     Groups sources into patches.
 
@@ -72,11 +82,13 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
             are currently considered to be point sources of flux unity)
         - 'facet' => group by facets using as an input a fits file. It requires
             the use of the additional parameter 'facet' to enter the name of the
-            fits file (NOTE: This method is experimental).
+            fits file.
         - 'voronoi' => given a previously grouped sky model, voronoi tesselate
-            using the patch positions
+            using the patch positions for patches above the target flux (specified
+            by the targetFlux parameter)
+        - 'meanshift' => use the meanshift clustering algorithm
         - the filename of a mask image => group by masked regions (where mask =
-            True). Source outside of masked regions are given patches of their
+            True). Sources outside of masked regions are given patches of their
             own
     targetFlux : str or float, optional
         Target flux for tessellation (the total flux of each tile will be close
@@ -111,8 +123,15 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
     facet : str, optional
         Facet fits file used with the algorithm 'facet'
     byPatch : bool, optional
-        For the 'tessellate' algorithm, use patches instead of by sources
-
+        For the 'tessellate' or 'meanshift' algorithms, use patches instead of sources
+    kernelSize : float, optional
+        Kernel size in degrees for meanshift grouping
+    nIterations : int, optional
+        Number of iterations for meanshift grouping
+    lookDistance : float, optional
+        Look distance in degrees for meanshift grouping
+    groupingDistance : float, optional
+        Grouping distance in degrees for meanshift grouping
 
     Examples
     --------
@@ -126,6 +145,7 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
     from . import _tessellate
     from . import _cluster
     from . import _threshold
+    from . import _meanshift
     import numpy as np
     import os
     from itertools import groupby
@@ -146,7 +166,8 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
         LSM.ungroup()
         patches = _cluster.compute_patch_center(LSM, applyBeam=applyBeam)
         patchCol = _cluster.create_clusters(LSM, patches, numClusters,
-            applyBeam=applyBeam, root=root, pad_index=pad_index)
+                                            applyBeam=applyBeam, root=root,
+                                            pad_index=pad_index)
         LSM.setColValues('Patch', patchCol, index=2)
 
     elif algorithm.lower() == 'tessellate':
@@ -155,29 +176,27 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
         else:
             units = 'Jy'
             if type(targetFlux) is str:
-                parts = [''.join(g).strip() for _, g in groupby(targetFlux,
-                    str.isalpha)]
+                parts = [''.join(g).strip() for _, g in groupby(targetFlux, str.isalpha)]
                 targetFlux = float(parts[0])
                 if len(parts) == 2:
                     units = parts[1]
         if byPatch:
-            if not 'Patch' in LSM.table.keys():
+            if 'Patch' not in LSM.table.keys():
                 raise ValueError('Sky model must be grouped before "byPatch" can be used.')
-            x, y, midRA, midDec  = LSM._getXY(byPatch=True)
+            x, y, midRA, midDec = LSM._getXY(byPatch=True)
             f = LSM.getColValues('I', units=units, applyBeam=applyBeam, aggregate='sum')
         else:
             LSM.ungroup()
-            x, y, midRA, midDec  = LSM._getXY()
+            x, y, midRA, midDec = LSM._getXY()
             f = LSM.getColValues('I', units=units, applyBeam=applyBeam)
-        vobin = _tessellate.bin2D(np.array(x), np.array(y), f,
-            target_flux=targetFlux)
+        vobin = _tessellate.bin2D(np.array(x), np.array(y), f, target_flux=targetFlux)
         try:
             vobin.bin_voronoi()
             patchCol = _tessellate.bins2Patches(vobin, root=root, pad_index=pad_index)
             if byPatch:
                 newPatchNames = patchCol.copy()
                 origPatchNames = LSM.getPatchNames()
-                patchCol = np.zeros(len(LSM), dtype='S100')
+                patchCol = np.zeros(len(LSM), dtype='U100')
                 for newPatchName, origPatchName in zip(newPatchNames, origPatchNames):
                     ind = np.array(LSM.getRowIndex(origPatchName))
                     patchCol[ind] = newPatchName
@@ -203,8 +222,7 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
         else:
             units = 'degree'
             if type(FWHM) is str:
-                parts = [''.join(g).strip() for _, g in groupby(FWHM,
-                    str.isalpha)]
+                parts = [''.join(g).strip() for _, g in groupby(FWHM, str.isalpha)]
                 FWHM = float(parts[0])
                 if len(parts) == 2:
                     units = parts[1]
@@ -218,27 +236,83 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
         from astropy.coordinates import SkyCoord
         import astropy.units as u
 
-        if not 'Patch' in LSM.table.keys():
+        if 'Patch' not in LSM.table.keys():
             raise ValueError('Sky model must be grouped before "voronoi" can be used.')
         else:
             dirs = LSM.getPatchPositions()
-        dirs_ras = [d[0] for name, d in dirs.iteritems()]
-        dirs_decs = [d[1] for name, d in dirs.iteritems()]
-        dirs_names = [name for name, d in dirs.iteritems()]
+
+        if targetFlux is not None:
+            # Select only those patches that lie above the target flux
+            units = 'Jy'
+            if type(targetFlux) is str:
+                parts = [''.join(g).strip() for _, g in groupby(targetFlux, str.isalpha)]
+                targetFlux = float(parts[0])
+                if len(parts) == 2:
+                    units = parts[1]
+            dirs_names = []
+            names = LSM.getPatchNames()
+            fluxes = LSM.getColValues('I', aggregate='sum', units=units, applyBeam=applyBeam)
+            for name, flux in zip(names, fluxes):
+                if flux >= targetFlux:
+                    dirs_names.append(name)
+            if len(dirs_names) == 0:
+                log.warn('No patches meet specified targetFlux. All sources placed in a single patch.')
+                LSM.ungroup()
+                addSingle(LSM, root)
+                return 0
+        else:
+            # Use all patches
+            dirs_names = [name for name, d in dirs.items()]
+
+        dirs_ras = []
+        dirs_decs = []
+        for name in dirs_names:
+            d = dirs[name]
+            dirs_ras.append(d[0])
+            dirs_decs.append(d[1])
         RADeg = LSM.getColValues('Ra', units='degree')
         DecDeg = LSM.getColValues('Dec', units='degree')
         patchNames = []
         for r, d in zip(RADeg, DecDeg):
             dists = SkyCoord(r*u.degree, d*u.degree).separation(
-                SkyCoord(dirs_ras*u.degree,dirs_decs*u.degree))
+                SkyCoord(dirs_ras*u.degree, dirs_decs*u.degree))
             patchNames.append(dirs_names[np.argmin(dists)])
         LSM.setColValues('Patch', patchNames, index=2)
+
+    elif algorithm.lower() == 'meanshift':
+        if byPatch:
+            if 'Patch' not in LSM.table.keys():
+                raise ValueError('Sky model must be grouped before "byPatch" can be used.')
+            x, y, midRA, midDec = LSM._getXY(byPatch=True)
+            f = LSM.getColValues('I', applyBeam=applyBeam, aggregate='sum')
+        else:
+            addEvery(LSM)
+            x, y, midRA, midDec = LSM._getXY()
+            f = LSM.getColValues('I', applyBeam=applyBeam)
+        crdelt = 0.066667  # WCS delta in deg/pixel, as used by LSM._getXY()
+        grouper = _meanshift.Grouper(list(zip(x, y)), f, kernelSize/crdelt, nIterations,
+                                     lookDistance/crdelt, groupingDistance/crdelt)
+        grouper.run()
+        clusters = grouper.grouping()
+        patchNames = LSM.getPatchNames()
+        table = LSM.table.copy()
+        for cindx, cluster in enumerate(clusters):
+            if pad_index:
+                name = '{0}_{1}'.format(root, str(int(cindx)).zfill(int(np.ceil(np.log10(len(cluster)+1)))))
+            else:
+                name = '{0}_{1}'.format(root, str(int(cindx)))
+            patches = patchNames[cluster]
+            for patchName in patches:
+                indices = LSM.getRowIndex(patchName)
+                table['Patch'][indices] = name
+        LSM.table = table
+        LSM._updateGroups()
 
     elif algorithm.lower() == 'facet':
         if os.path.exists(facet):
             RADeg = LSM.getColValues('Ra', units='degree')
             DecDeg = LSM.getColValues('Dec', units='degree')
-            facet_col = get_facet_values(facet, RADeg, DecDeg, root=root)
+            facet_col = get_facet_values(facet, RADeg, DecDeg, root=root, pad_index=pad_index)
             LSM.setColValues('Patch', facet_col, index=2)
         else:
             raise ValueError('Please enter the facet filename in the facet parameter.')
@@ -248,7 +322,7 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
         mask = algorithm
         RARad = LSM.getColValues('Ra', units='radian')
         DecRad = LSM.getColValues('Dec', units='radian')
-        patchCol = getPatchNamesFromMask(mask, RARad, DecRad, root=root)
+        patchCol = getPatchNamesFromMask(mask, RARad, DecRad, root=root, pad_index=pad_index)
         LSM.setColValues('Patch', patchCol, index=2)
 
     else:
@@ -277,19 +351,16 @@ def addSingle(LSM, patchName):
 
 def addEvery(LSM):
     """Add a Patch column with a different name for each source"""
-    import numpy as np
-
     names = LSM.getColValues('Name').copy()
     for i, name in enumerate(names):
         names[i] = name + '_patch'
     LSM.setColValues('Patch', names, index=2)
 
 
-def getPatchNamesFromMask(mask, RARad, DecRad, root='mask'):
+def getPatchNamesFromMask(mask, RARad, DecRad, root='mask', pad_index=False):
     """
     Returns an array of patch names for each (RA, Dec) pair in radians
     """
-    import math
     import pyrap.images as pim
     import scipy.ndimage as nd
     import numpy as np
@@ -319,10 +390,9 @@ def getPatchNamesFromMask(mask, RARad, DecRad, root='mask'):
     n = 0
     for p in patchNums:
         if p != 0:
-            in_patch = np.where(patchNums == p)
             if pad_index:
-                patchNames.append('{0}_patch_'.format(root)+
-                    str(p).zfill(int(np.ceil(np.log10(len(patchNums))))))
+                patchNames.append('{0}_patch_'.format(root) +
+                                  str(p).zfill(int(np.ceil(np.log10(len(set(patchNums))+1)))))
             else:
                 patchNames.append('{0}_patch_'.format(root)+str(p))
         else:
@@ -331,7 +401,8 @@ def getPatchNamesFromMask(mask, RARad, DecRad, root='mask'):
 
     return np.array(patchNames)
 
-def get_facet_values(facet, ra, dec, root="facet", default=0):
+
+def get_facet_values(facet, ra, dec, root="facet", default=0, pad_index=False):
     """
     Extract the value from a fits facet file
     """
@@ -346,17 +417,24 @@ def get_facet_values(facet, ra, dec, root="facet", default=0):
         shape = f[0].data.shape
 
         w = WCS(f[0].header)
-        freq = w.wcs.crval[2]
-        stokes = w.wcs.crval[3]
-
-        xe, ye, _1, _2 = w.all_world2pix(ra, dec, freq, stokes, 1)
+        if len(w.wcs.crval) == 4:
+            freq = w.wcs.crval[2]
+            stokes = w.wcs.crval[3]
+            xe, ye, _1, _2 = w.all_world2pix(ra, dec, freq, stokes, 1)
+        elif len(w.wcs.crval) == 2:
+            xe, ye = w.all_world2pix(ra, dec, 1)
+        else:
+            raise ValueError('Input mask must have 2 axes (x, y) or 4 axes (x, y, freq, stokes).')
         x, y = np.round(xe).astype(int), np.round(ye).astype(int)
 
         # Dummy value for points out of the fits area
         x[(x < 0) | (x >= shape[-1])] = -1
         y[(y < 0) | (y >= shape[-2])] = -1
 
-        data = f[0].data[0,0,:,:]
+        if len(w.wcs.crval) == 4:
+            data = f[0].data[0, 0, :, :]
+        else:
+            data = f[0].data[:, :]
 
         values = data[y, x]
 
@@ -364,7 +442,7 @@ def get_facet_values(facet, ra, dec, root="facet", default=0):
         values[(x == -1) | (y == -1)] = default
         values[np.isnan(values)] = default
 
-        #TODO: Flexible format for other data types ?
-        return np.array(["{}_{:.0f}".format(root, val) for val in values])
-
-
+        if pad_index:
+            return np.array(["{0}_{1}".format(root, str(int(val)).zfill(int(np.ceil(np.log10(len(set(values))+1))))) for val in values])
+        else:
+            return np.array(["{0}_{1}".format(root, int(val)) for val in values])
