@@ -1,14 +1,8 @@
 from __future__ import print_function
 from setuptools import setup, Command
 import os
+import sys
 import lsmtool._version
-
-
-description = 'The LOFAR Local Sky Model Tool'
-long_description = description
-if os.path.exists('README.md'):
-    with open('README.md') as f:
-        long_description=f.read()
 
 
 class PyTest(Command):
@@ -24,6 +18,11 @@ class PyTest(Command):
         errno = subprocess.call([sys.executable, 'runtests.py'])
         raise SystemExit(errno)
 
+# Handle Python 3-only dependencies
+if sys.version_info < (3, 0):
+    reqlist = ['numpy','astropy >= 0.4, <3.0']
+else:
+    reqlist = ['numpy','astropy >= 0.4']
 
 setup(
     name='lsmtool',
@@ -31,21 +30,18 @@ setup(
     url='http://github.com/darafferty/lsmtool/',
     author='David Rafferty',
     author_email='drafferty@hs.uni-hamburg.de',
-    description=description,
-    long_description=long_description,
+    description='The LOFAR Local Sky Model Tool',
     platforms='any',
-    classifiers = [
+    classifiers=[
         'Programming Language :: Python',
-        'Development Status :: 4 - Beta',
         'Natural Language :: English',
         'Intended Audience :: Science/Research',
-        'Operating System :: POSIX :: Linux',
         'Topic :: Scientific/Engineering :: Astronomy',
         'Topic :: Software Development :: Libraries :: Python Modules',
         ],
-    install_requires=['numpy','astropy >= 0.4'],
-    scripts = ['bin/lsmtool'],
+    install_requires=reqlist,
+    scripts=['bin/lsmtool'],
     packages=['lsmtool','lsmtool.operations'],
-    setup_requires = ['pytest-runner'],
-    tests_require = ['pytest']
+    setup_requires=['pytest-runner'],
+    tests_require=['pytest']
     )

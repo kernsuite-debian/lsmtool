@@ -3,13 +3,35 @@
 # This module stores the version and changelog
 
 # Version number
-__version__ = '1.2.0'
+__version__ = '1.4.1'
 
 # Change log
 def changelog():
     log = """
     LSMTool Changelog.
     -----------------------------------------------
+
+    2019/04/12 - Version 1.4.1
+
+        Fix installation on Python 3 systems
+
+        Update GSM url
+
+    2019/03/21 - Version 1.4.0
+
+        Allow 2D images as masks in group operation
+
+        Add TGSS and GSM VO queries
+
+        Add option to apply beam attenuation during write
+
+    2018/05/04 - Version 1.3.1
+
+        Improve packaging support
+
+    2018/05/03 - Version 1.3.0
+
+        Add option to tessellate using patches
 
     2017/06/15 - Version 1.2.0
 
