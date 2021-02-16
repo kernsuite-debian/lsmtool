@@ -1,3 +1,11 @@
+lsmtool (1.4.2-1kern2) focal; urgency=medium
+
+  [ Athanaseus Javas Ramaila ]
+  * Drop Python2 support
+  * Build for focal
+
+ -- KERN packaging <packaging@kernsuite.info>  Tue, 16 Feb 2021 09:45:07 +0000
+
 lsmtool (1.4.2-1kern1) bionic; urgency=medium
 
   * New upstream version 1.4.2

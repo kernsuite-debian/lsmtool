@@ -4,4 +4,4 @@
 export PYBUILD_NAME=lsmtool
 
 %:
-	dh $@  --with python2,python3 --buildsystem=pybuild --parallel
+	dh $@  --with python3 --buildsystem=pybuild --parallel
