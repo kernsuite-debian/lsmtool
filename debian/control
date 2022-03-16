@@ -28,7 +28,7 @@ Description: LOFAR Local Sky Model Tool  (Python 3)
 
 Package: lsmtool
 Architecture: all
-Depends: ${python3:Depends}, ${misc:Depends}, python-lsmtool
+Depends: ${python3:Depends}, ${misc:Depends}, python3-lsmtool
 Description: LOFAR Local Sky Model Tool  (Python 3)
  LSMTool allows the manipulation of LOFAR sky models (in the makesourcedb format).
  .
