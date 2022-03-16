@@ -1,3 +1,10 @@
+lsmtool (1.4.2-1kern4) focal; urgency=medium
+
+  [ Athanaseus Javas Ramaila ]
+  * Build for focal
+
+ -- KERN packaging <packaging@kernsuite.info>  Wed, 16 Mar 2022 09:20:30 +0000
+
 lsmtool (1.4.2-1kern3) bionic; urgency=medium
 
   [ Athanaseus Javas Ramaila ]
