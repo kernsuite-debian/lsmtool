@@ -28,6 +28,7 @@ except AttributeError:
     # Python 3
     def itervalues(d):
         return iter(d.values())
+
     def iteritems(d):
         return iter(d.items())
     numpy_type = "U"
@@ -35,6 +36,7 @@ else:
     # Python 2
     def itervalues(d):
         return d.itervalues()
+
     def iteritems(d):
         return d.iteritems()
     numpy_type = "S"
@@ -1283,7 +1285,7 @@ class SkyModel(object):
         try:
             vals = attenuate(self.beamMS, flux, RADeg, DecDeg, timeIndx=self.beamTime)
         except Exception as e:
-            self.log.warn('{0}. No beam attenuation applied.'.format(e.message))
+            self.log.warn('{0}. No beam attenuation applied.'.format(e))
             return col
 
         col[:] = vals
@@ -1875,10 +1877,10 @@ class SkyModel(object):
 
             >>> s.select('Name == src*_1?')
 
-        Use a CASA clean mask image named 'clean_mask.mask' to remove sources
+        Use a CASA clean mask image named 'clean_mask.mask' to select sources
         that lie in masked regions::
 
-            >>> s.filter('clean_mask.mask == True')
+            >>> s.select('clean_mask.mask == True')
 
         """
         operations.select.select(self, filterExpression, aggregate=aggregate,
@@ -1986,7 +1988,7 @@ class SkyModel(object):
         operations.remove.remove(self, filterExpression, aggregate=aggregate,
                                  applyBeam=applyBeam, useRegEx=useRegEx, force=force)
 
-    def group(self, algorithm, targetFlux=None, numClusters=100, FWHM=None,
+    def group(self, algorithm, targetFlux=None, weightBySize=False, numClusters=100, FWHM=None,
               threshold=0.1, applyBeam=False, root='Patch', pad_index=False,
               method='mid', facet="", byPatch=False, kernelSize=0.1,
               nIterations=100, lookDistance=0.2, groupingDistance=0.01):
@@ -2000,17 +2002,17 @@ class SkyModel(object):
         algorithm : str
             Algorithm to use for grouping:
             - 'single' => all sources are grouped into a single patch
-            - 'every' => every source gets a separate patch
+            - 'every' => every source gets a separate patch named 'source_patch'
             - 'cluster' => SAGECAL clustering algorithm that groups sources into
-                specified number of clusters (specified by the numClusters parameter).
+                specified number of clusters (specified by the numClusters parameter)
             - 'tessellate' => group into tiles whose total flux approximates
-                the target flux (specified by the targetFlux parameter).
+                the target flux (specified by the targetFlux parameter)
             - 'threshold' => group by convolving the sky model with a Gaussian beam
                 and then thresholding to find islands of emission (NOTE: all sources
                 are currently considered to be point sources of flux unity)
             - 'facet' => group by facets using as an input a fits file. It requires
                 the use of the additional parameter 'facet' to enter the name of the
-                fits file (NOTE: This method is experimental).
+                fits file.
             - 'voronoi' => given a previously grouped sky model, voronoi tesselate
                 using the patch positions for patches above the target flux (specified
                 by the targetFlux parameter)
@@ -2020,8 +2022,13 @@ class SkyModel(object):
                 own
         targetFlux : str or float, optional
             Target flux for tessellation (the total flux of each tile will be close
-            to this value). The target flux can be specified as either a float in Jy
-            or as a string with units (e.g., '25.0 mJy')
+            to this value) and voronoi algorithms. The target flux can be specified
+            as either a float in Jy or as a string with units (e.g., '25.0 mJy')
+        weightBySize : bool, optional
+            If True, fluxes are weighted by patch size (as median_size / size) when
+            the targetFlux criterion is applied. Patches with sizes below the median
+            (flux-weighted) size are upweighted and those above the mean are
+            downweighted
         numClusters : int, optional
             Number of clusters for clustering. Sources are grouped around the
             numClusters brightest sources.
@@ -2070,7 +2077,7 @@ class SkyModel(object):
             >>> s.group('tessellate', targetFlux=30.0)
 
         """
-        operations.group.group(self, algorithm, targetFlux=targetFlux,
+        operations.group.group(self, algorithm, targetFlux=targetFlux, weightBySize=weightBySize,
                                numClusters=numClusters, FWHM=FWHM, threshold=threshold,
                                applyBeam=applyBeam, root=root, pad_index=pad_index,
                                method=method, facet=facet, byPatch=byPatch,
@@ -2375,3 +2382,157 @@ class SkyModel(object):
 
         """
         operations.plot.plot(self, fileName=fileName, labelBy=labelBy)
+
+    def rasterize(self, cellsize, fileRoot=None, writeRegionFile=False, clobber=False):
+        """
+        Rasterize the sky model to FITS images (one image per spectral term).
+
+        The resulting images can be used with DDECal in DPPP for prediction using IDG
+        (if the sky model is grouped into contiguous patches, a ds9 region file defining
+        the Voronio patches can also written).
+
+        Note: currently, only sky models with LogarithmicSI = False are supported at
+        this time.
+
+        Parameters
+        ----------
+        cellsize : float
+            The cellsize in degrees for the output image.
+        fileRoot : str, optional
+            Filename root for the output FITS images. The images will be named
+            fileRoot_0.fits, fileRoot_1.fits, etc. (one for each spectral term in
+            the sky model). If writeRegionFile is True, a ds9 region file is also
+            written as fileRoot.reg.
+        writeRegionFile : bool, optional
+            If True and the sky model is grouped into contiguous patches, a ds9 region
+            file defining the Voronio patches will be written (this file is required
+            for DDECal)
+        clobber : bool, optional
+            If True, existing files are overwritten.
+        """
+        import numpy as np
+        from astropy.io import fits as pyfits
+        from astropy import wcs
+        from .operations_lib import make_template_image, gaussian_fcn, tessellate, xy2radec, radec2xy
+
+        # Make a blank image for each spectral term
+        referenceFrequency = self.getColValues('ReferenceFrequency')
+        refFreq = referenceFrequency[0]  # TODO: allow per-source ref freq
+        fluxes = self.getColValues('I')
+        types = self.getColValues('Type')
+        nsources = len(fluxes)
+        if 'SpectralIndex' in self.getColNames():
+            spectral_indices = self.getColValues('SpectralIndex')
+        else:
+            spectral_indices = [[]] * nsources
+        nterms = len(spectral_indices[0]) + 1
+
+        # Check that LogarithmicSI = False for all entries
+        if nterms > 1:
+            logsi = self.getColValues('LogarithmicSI')
+            if np.any(logsi == 'true'):
+                raise RuntimeError('Sky model has one or more sources with '
+                                   'LogarithmicSI = True. Only sky models with '
+                                   'LogarithmicSI = False are supported at this time.')
+
+        image_names = ['{0}_{1}.fits'.format(fileRoot, i) for i in range(nterms)]
+        x, y, refRA, refDec = self._getXY(crdelt=cellsize)
+        if 'GAUSSIAN' in types:
+            fwhm = np.max(self.getColValues('MajorAxis', units='degree') * cellsize)
+            max_source_size = int(np.ceil(fwhm * 1.5))
+        else:
+            max_source_size = 2
+        xpadding = int(0.2 * (np.max(x) - np.min(x)))
+        ypadding = int(0.2 * (np.max(y) - np.min(y)))
+        xpadding += max_source_size
+        if xpadding % 2:
+            xpadding += 1
+        ypadding += max_source_size
+        if ypadding % 2:
+            ypadding += 1
+        xsize = int(np.max(x) - np.min(x)) + xpadding
+        ysize = int(np.max(y) - np.min(y)) + ypadding
+
+        # Now we have the size, refine the RA, Dec of the image center
+        xcen = np.min(x) + (np.max(x) - np.min(x)) / 2.0
+        ycen = np.min(y) + (np.max(y) - np.min(y)) / 2.0
+        refRA, refDec = xy2radec([xcen], [ycen], refRA=refRA, refDec=refDec, crdelt=cellsize)
+        RA = self.getColValues('Ra')
+        Dec = self.getColValues('Dec')
+
+        for image_name in image_names:
+            make_template_image(image_name, refRA[0], refDec[0], refFreq,
+                                ximsize=xsize, yimsize=ysize, cellsize_deg=cellsize)
+
+        # Build each image, one at a time (to minimize memory usage)
+        for t, image_name in enumerate(image_names):
+            # Read in image data
+            hdu = pyfits.open(image_name, memmap=False)
+            imdata = hdu[0].data
+            w = wcs.WCS(hdu[0].header)
+
+            # Loop over sources, adding them to the images (note that the spectral terms
+            # sum together when summing polynomials, just as the flux densities do)
+            if t == 0:
+                # Flux densities
+                itervalues = fluxes
+            else:
+                # Spectral terms
+                itervalues = spectral_indices
+            for i, (ra_src, dec_src, val, type) in enumerate(zip(RA, Dec, itervalues, types)):
+                if t > 0:
+                    v = val[t-1]
+                    const = True
+                else:
+                    v = val
+                    const = False
+                ra_dec = np.array([[ra_src, dec_src, 0.0, 0.0]])
+                xs, ys = w.wcs_world2pix(ra_dec, 0)[0][0], w.wcs_world2pix(ra_dec, 0)[0][1]
+                if type == 'POINT':
+                    imdata[0, 0, int(np.round(ys)), int(np.round(xs))] += v
+                elif type == 'GAUSSIAN':
+                    S1 = self.getColValues('MajorAxis', units='degree')[i] / cellsize  # pixels
+                    S2 = self.getColValues('MinorAxis', units='degree')[i] / cellsize  # pixels
+                    Th = self.getColValues('Orientation')[i]  # degrees
+                    C1, C2 = ys, xs
+                    b = np.ceil(S1 * 2.5)
+                    bbox = np.s_[max(0, int(C1-b)):min(xsize, int(C1+b+1)),
+                                 max(0, int(C2-b)):min(ysize, int(C2+b+1))]
+                    x_ax, y_ax = np.mgrid[bbox]
+                    g = [v, C1, C2, S1, S2, Th]
+                    ffimg = gaussian_fcn(g, x_ax, y_ax, const=const)
+                    imdata[0, 0, :, :][bbox] += ffimg
+            hdu[0].data = imdata
+            hdu.writeto(image_name, overwrite=True)
+
+        # Make region file if needed
+        if writeRegionFile and self.hasPatches:
+            RA, Dec = self.getPatchPositions(asArray=True)
+            patch_names = self.getPatchNames()
+            x_pix_list = []
+            y_pix_list = []
+            for ra_src, dec_src in zip(RA, Dec):
+                ra_dec = np.array([[ra_src, dec_src, 0.0, 0.0]])
+                y_pix, x_pix = w.wcs_world2pix(ra_dec, 0)[0][0], w.wcs_world2pix(ra_dec, 0)[0][1]
+                x_pix_list.append(x_pix)
+                y_pix_list.append(y_pix)
+            dist_pix = np.sqrt(xsize**2 + ysize**2)
+            vertices = tessellate(x_pix_list, y_pix_list, w, dist_pix)
+            lines = []
+            lines.append('# Region file format: DS9 version 4.0\nglobal color=green '
+                         'font="helvetica 10 normal" select=1 highlite=1 edit=1 '
+                         'move=1 delete=1 include=1 fixed=0 source=1\nfk5\n')
+            for verts, pname in zip(vertices, patch_names):
+                xylist = []
+                varray = np.array(verts).T
+                RAs = varray[0]
+                Decs = varray[1]
+                for x, y in zip(RAs, Decs):
+                    xylist.append('{0}, {1}'.format(x, y))
+                lines.append('polygon({0}) # text={{{1}}}\n'.format(', '.join(xylist), pname))
+
+            outputfile = '{0}.reg'.format(fileRoot)
+            with open(outputfile, 'w') as f:
+                f.writelines(lines)
+
+

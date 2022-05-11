@@ -37,7 +37,7 @@ def run(step, parset, LSM):
         plot(LSM, fileName=outFile, labelBy=labelBy)
         result = 0
     except Exception as e:
-        log.error(e.message)
+        log.error(e)
         result = 1
 
     return 0
@@ -77,13 +77,13 @@ def plot(LSM, fileName=None, labelBy=None):
         import os
         if 'DISPLAY' not in os.environ:
             import matplotlib
-            if matplotlib.get_backend() is not 'Agg':
+            if matplotlib.get_backend() != 'Agg':
                 matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from matplotlib.ticker import FuncFormatter
     except Exception as e:
         raise ImportError('PyPlot could not be imported. Plotting is not '
-            'available: {0}'.format(e.message))
+            'available: {0}'.format(e))
     try:
         try:
             from astropy.visualization.wcsaxes import WCSAxes
