@@ -1,2 +1,3 @@
 version=3
-https://github.com/darafferty/LSMTool/releases /darafferty/LSMTool/archive/v(\d[\.\d]+).tar.gz
+opts=filenamemangle=s/.+\/v?(\d\S*)\.tar\.gz/LSMTool-$1\.tar\.gz/ \
+  https://github.com/darafferty/LSMTool/tags .*/v?(\d\S*)\.tar\.gz
