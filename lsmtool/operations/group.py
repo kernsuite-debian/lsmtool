@@ -48,7 +48,7 @@ def run(step, parset, LSM):
               float(lookDistance), float(groupingDistance))
         result = 0
     except Exception as e:
-        log.error(e.message)
+        log.error(e)
         result = 1
 
     # Write to outFile
@@ -58,7 +58,7 @@ def run(step, parset, LSM):
     return result
 
 
-def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
+def group(LSM, algorithm, targetFlux=None, weightBySize=False, numClusters=100, FWHM=None,
           threshold=0.1, applyBeam=False, root='Patch', pad_index=False, method='mid',
           facet="", byPatch=False, kernelSize=0.1, nIterations=100, lookDistance=0.2,
           groupingDistance=0.01):
@@ -92,8 +92,13 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
             own
     targetFlux : str or float, optional
         Target flux for tessellation (the total flux of each tile will be close
-        to this value). The target flux can be specified as either a float in Jy
-        or as a string with units (e.g., '25.0 mJy')
+        to this value) and voronoi algorithms. The target flux can be specified
+        as either a float in Jy or as a string with units (e.g., '25.0 mJy')
+    weightBySize : bool, optional
+        If True, fluxes are weighted by patch size (as median_size / size) when
+        the targetFlux criterion is applied. Patches with sizes below the median
+        (flux-weighted) size are upweighted and those above the median are
+        downweighted
     numClusters : int, optional
         Number of clusters for clustering. Sources are grouped around the
         numClusters brightest sources
@@ -145,7 +150,10 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
     from . import _tessellate
     from . import _cluster
     from . import _threshold
-    from . import _meanshift
+    try:
+        from . import _meanshiftc as _meanshift
+    except ImportError:
+        from . import _meanshift
     import numpy as np
     import os
     from itertools import groupby
@@ -252,6 +260,15 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
             dirs_names = []
             names = LSM.getPatchNames()
             fluxes = LSM.getColValues('I', aggregate='sum', units=units, applyBeam=applyBeam)
+            if weightBySize:
+                sizes = LSM.getPatchSizes(units='arcsec', weight=True, applyBeam=applyBeam)
+                sizes[sizes < 1.0] = 1.0
+                bright_ind = np.where(fluxes >= targetFlux)
+                medianSize = np.median(sizes[bright_ind])
+                weights = medianSize / sizes
+                weights[weights > 1.0] = 1.0
+                weights[weights < 0.5] = 0.5
+                fluxes *= weights
             for name, flux in zip(names, fluxes):
                 if flux >= targetFlux:
                     dirs_names.append(name)
@@ -333,7 +350,7 @@ def group(LSM, algorithm, targetFlux=None, numClusters=100, FWHM=None,
     history = "algorithm = '{0}'".format(algorithm)
     if algorithm.lower() == 'cluster':
         history += ', numClusters = {0}'.format(numClusters)
-    elif algorithm.lower() == 'tessellate':
+    elif algorithm.lower() == 'tessellate' or algorithm.lower() == 'voronoi':
         history += ', targetFlux = {0}'.format(targetFlux)
     LSM._addHistory("GROUP ({0})".format(history))
     LSM.setPatchPositions(method=method, applyBeam=applyBeam)

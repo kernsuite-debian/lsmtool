@@ -18,12 +18,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-
+import astropy
 from astropy.table import Table, Column, MaskedColumn
 from astropy.coordinates import Angle
 from astropy.io import registry
 import astropy.io.ascii as ascii
+from distutils.version import LooseVersion
 import numpy as np
+import numpy.ma as ma
 import re
 import logging
 import os
@@ -176,17 +178,27 @@ def createTable(outlines, metaDict, colNames, colDefaults):
     table : astropy.table.Table object
 
     """
-    # Before loading table into an astropy Table object, set lengths of Name,
-    # Patch, and Type columns to 100 characters
     log = logging.getLogger('LSMTool.Load')
 
+    # Before loading table into an astropy Table object, set lengths of Name,
+    # Patch, and Type columns to 100 characters. Due to a change in the astropy
+    # table API with v4.1, we have to check the version and use the appropriate
+    # column names
+    if LooseVersion(astropy.__version__) < LooseVersion('4.1'):
+        # Use the input column names for the converters
+        nameCol = 'col{0}'.format(colNames.index('Name')+1)
+        typeCol = 'col{0}'.format(colNames.index('Type')+1)
+        if 'Patch' in colNames:
+            patchCol = 'col{0}'.format(colNames.index('Patch')+1)
+    else:
+        # Use the output column names for the converters
+        nameCol = 'Name'
+        typeCol = 'Type'
+        patchCol = 'Patch'
     converters = {}
-    nameCol = 'col{0}'.format(colNames.index('Name')+1)
     converters[nameCol] = [ascii.convert_numpy('{}100'.format(numpy_type))]
-    typeCol = 'col{0}'.format(colNames.index('Type')+1)
     converters[typeCol] = [ascii.convert_numpy('{}100'.format(numpy_type))]
     if 'Patch' in colNames:
-        patchCol = 'col{0}'.format(colNames.index('Patch')+1)
         converters[patchCol] = [ascii.convert_numpy('{}100'.format(numpy_type))]
 
     log.debug('Creating table...')
@@ -255,7 +267,10 @@ def createTable(outlines, metaDict, colNames, colDefaults):
     table.add_column(DecCol, index=DecIndx)
 
     def fluxformat(val):
-        return '{0:0.3f}'.format(val)
+        if type(val) is ma.core.MaskedConstant:
+            return '{}'.format(val)
+        else:
+            return '{0:0.3f}'.format(val)
     table.columns['I'].format = fluxformat
 
     # Set column units and default values
@@ -485,7 +500,7 @@ def RA2Angle(RA):
             raise
         except Exception as e:
             raise ValueError('RA not understood (must be string in '
-                'makesourcedb format or float in degrees): {0}'.format(e.message))
+                'makesourcedb format or float in degrees): {0}'.format(e))
     else:
         RAAngle = Angle(RA, unit=u.deg)
 
@@ -523,10 +538,10 @@ def Dec2Angle(Dec):
                 DecAngle = Angle(DecSex, unit=u.deg)
             except Exception as e:
                 raise ValueError('Dec not understood (must be string in '
-                    'makesourcedb format or float in degrees): {0}'.format(e.message))
+                    'makesourcedb format or float in degrees): {0}'.format(e))
         except Exception as e:
             raise ValueError('Dec not understood (must be string in '
-                'makesourcedb format or float in degrees): {0}'.format(e.message))
+                'makesourcedb format or float in degrees): {0}'.format(e))
     else:
         DecAngle = Angle(Dec, unit=u.deg)
 
@@ -538,16 +553,19 @@ def skyModelIdentify(origin, *args, **kwargs):
     Identifies valid makesourcedb sky model files.
     """
     # Search for a format line. If found, assume file is valid
-    if isinstance(args[0], basestring):
-        f = open(args[0])
-    elif isinstance(args[0], file_types):
-        f = args[0]
-    else:
+    try:
+        if isinstance(args[0], basestring):
+            f = open(args[0])
+        elif isinstance(args[0], file_types):
+            f = args[0]
+        else:
+            return False
+        for line in f:
+            if line.startswith("FORMAT") or line.startswith("format"):
+                return True
         return False
-    for line in f:
-        if line.startswith("FORMAT") or line.startswith("format"):
-            return True
-    return False
+    except UnicodeDecodeError:
+        return False
 
 
 def skyModelWriter(table, fileName):
@@ -607,8 +625,8 @@ def skyModelWriter(table, fileName):
             else:
                 gRA = 0.0
                 gDec = 0.0
-            gRAStr = Angle(gRA, unit='degree').to_string(unit='hourangle', sep=':')
-            gDecStr = Angle(gDec, unit='degree').to_string(unit='degree', sep='.')
+            gRAStr = Angle(gRA, unit='degree').to_string(unit='hourangle', sep=':', precision=4)
+            gDecStr = Angle(gDec, unit='degree').to_string(unit='degree', sep='.', precision=4)
 
             outLines.append(' , , {0}, {1}, {2}\n'.format(patchName, gRAStr,
                 gDecStr))
@@ -649,29 +667,42 @@ def rowStr(row, metaDict):
             colName = allowedColumnNames[colKey.lower()]
         except KeyError:
             continue
-        d = row[colKey]
-        if np.all(d == -9999):
-            dstr = ' '
+
+        # Determine whether the header (metaDict) defined a fill value and,
+        # if so, use that for blank entries. If not, use the default value
+        defaultVal = allowedColumnDefaults[colName.lower()]
+        if colName in metaDict:
+            fillVal = metaDict[colName]
+            hasfillVal = True
         else:
-            defaultVal = allowedColumnDefaults[colName.lower()]
-            if colName in metaDict:
-                fillVal = metaDict[colName]
-                hasfillVal = True
+            fillVal = defaultVal
+            hasfillVal = False
+
+        d = row[colKey]
+        if str(d).startswith('-9999'):
+            if hasfillVal:
+                dstr = ' '
             else:
-                fillVal = defaultVal
-                hasfillVal = False
+                dstr = str(fillVal)
+        else:
             if type(d) is np.ndarray:
-                dlist = d.tolist()
-                # Blank the value if it's equal to fill values
-                if hasfillVal and dlist == fillVal:
-                    dlist = []
-                # Remove blanked values
-                if len(dlist) > 0:
-                    while dlist[-1] == -9999:
-                        dlist.pop()
-                        if len(dlist) == 0:
-                            break
-                dstr = str(dlist)
+                if np.all(d == -9999):
+                    if hasfillVal:
+                        dstr = ' '
+                    else:
+                        dstr = str(fillVal)
+                else:
+                    dlist = d.tolist()
+                    # Blank the value if it's equal to fill values
+                    if hasfillVal and dlist == fillVal:
+                        dlist = []
+                    # Remove blanked values
+                    if len(dlist) > 0:
+                        while dlist[-1] == -9999:
+                            dlist.pop()
+                            if len(dlist) == 0:
+                                break
+                    dstr = str(dlist)
             else:
                 if colKey == 'Ra':
                     dstr = Angle(d, unit='degree').to_string(unit='hourangle', sep=':')

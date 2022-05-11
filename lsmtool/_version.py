@@ -3,13 +3,47 @@
 # This module stores the version and changelog
 
 # Version number
-__version__ = '1.4.1'
+__version__ = '1.4.7'
 
 # Change log
 def changelog():
     log = """
     LSMTool Changelog.
     -----------------------------------------------
+
+    2022/02/23 - Version 1.4.7
+
+        Fix reading of patchless tables for astropy versions < 4.1
+
+    2022/02/08 - Version 1.4.6
+
+        Fix table column converters for astropy versions >= 4.1
+
+    2022/02/04 - Version 1.4.5
+
+        Fix regression in handling of blank values introduced in v1.4.4
+
+    2022/01/27 - Version 1.4.4
+
+        Fix improper handling of blank values
+
+        Add support for EveryBeam
+
+    2021/04/07 - Version 1.4.3
+
+        Publish on PyPI
+
+        Add faster version of meanshift algorithm
+
+        Fix to incorrect filtering with mask images
+
+        Fix to Astropy registry check
+
+    2019/10/01 - Version 1.4.2
+
+        Fix to incorrect header on write
+
+        Add meanshift grouping algorithm
 
     2019/04/12 - Version 1.4.1
 

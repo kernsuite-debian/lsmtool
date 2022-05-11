@@ -46,7 +46,7 @@ def run(step, parset, LSM):
             excludeMultiple=excludeMultiple, ignoreSpec=ignoreSpec)
         result = 0
     except Exception as e:
-        log.error(e.message)
+        log.error(e)
         result = 1
 
     return result
@@ -306,13 +306,13 @@ def plotFluxRatiosDist(predFlux, measFlux, RA, Dec, refRA, refDec, labels,
         from astropy.stats import sigma_clip
     try:
         import matplotlib
-        if matplotlib.get_backend() is not 'Agg':
+        if matplotlib.get_backend() != 'Agg':
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from matplotlib.ticker import FuncFormatter
     except Exception as e:
         raise ImportError('PyPlot could not be imported. Plotting is not '
-            'available: {0}'.format(e.message))
+            'available: {0}'.format(e))
 
     if name1 is None:
         name1 = 'Model 1'
@@ -367,13 +367,13 @@ def plotFluxRatiosFlux(predFlux, measFlux, labels, outDir, name1, name2, format,
         from astropy.stats import sigma_clip
     try:
         import matplotlib
-        if matplotlib.get_backend() is not 'Agg':
+        if matplotlib.get_backend() != 'Agg':
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from matplotlib.ticker import FuncFormatter
     except Exception as e:
         raise ImportError('PyPlot could not be imported. Plotting is not '
-            'available: {0}'.format(e.message))
+            'available: {0}'.format(e))
 
     if name1 is None:
         name1 = 'Model 1'
@@ -427,14 +427,14 @@ def plotFluxRatioSky(predFlux, measFlux, x, y, RA, Dec, midRA, midDec, labels,
         from astropy.stats import sigma_clip
     try:
         import matplotlib
-        if matplotlib.get_backend() is not 'Agg':
+        if matplotlib.get_backend() != 'Agg':
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.colors as colors
         from matplotlib.ticker import FuncFormatter
     except Exception as e:
         raise ImportError('PyPlot could not be imported. Plotting is not '
-            'available: {0}'.format(e.message))
+            'available: {0}'.format(e))
     try:
         from wcsaxes import WCSAxes
         hasWCSaxes = True
@@ -509,13 +509,13 @@ def plotOffsets(RA, Dec, refRA, refDec, x, y, refx, refy, labels, outDir,
         from astropy.stats import sigma_clip
     try:
         import matplotlib
-        if matplotlib.get_backend() is not 'Agg':
+        if matplotlib.get_backend() != 'Agg':
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from matplotlib.ticker import FuncFormatter
     except Exception as e:
         raise ImportError('PyPlot could not be imported. Plotting is not '
-            'available: {0}'.format(e.message))
+            'available: {0}'.format(e))
 
     if excludeByFlux:
         ratio = measFlux / predFlux
