@@ -1,3 +1,10 @@
+lsmtool (1.4.7-1kern1) focal; urgency=medium
+
+  [ Athanaseus Javas Ramaila ]
+  * New upstream version 1.4.7
+
+ -- KERN packaging <packaging@kernsuite.info>  Wed, 11 May 2022 13:53:18 +0000
+
 lsmtool (1.4.2-1kern4) focal; urgency=medium
 
   [ Athanaseus Javas Ramaila ]
